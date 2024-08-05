@@ -1,0 +1,234 @@
+---
+title: "Predicting Annual Average PM2.5 Concentration"
+author: "Brian Nguyen"
+date: "2023-04-28"
+output:
+  html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE,  
+                      warning = FALSE, message = FALSE, 
+                      fig.align = "center",
+                      R.options = list(max.print=100))
+```
+
+# Introduction
+
+## Choosing Models, Predictors, and Expectations
+
+The three models that I have chosen were Linear Regression, K-Nearest Neighbor, and Poisson Regression. Linear regression finds the best relationship between the dependent variable and predictors by calculating a linear equation with the smallest sum of residual errors. K-nearest neighbor regression assigns data assigns data to neighboring values and averages that cluster's value as the predicted value. Poisson regression predicts values for the dependent variable based on the assumption that the dependent variable has a Poisson distribution.
+
+The predictor variables for our models were determined by what I thought would have the most impact on PM2.5 value. For example, 'lat' and 'lon' of a location are important variables that indicate the climate of an area, which could help estimate the pollution. As for 'zcta_pop', knowing the population of an area can help predict pollution because one can expect higher populations to produce more pollution. The last two variables, 'CMAQ' and 'aod', may also play a large role in the prediction because they specifically simulate or measure pollution for locations. Scatterplots were made for each predictor and PM2.5 value, revealing positive correlations for all except 'lat'. Ultimately, with these predictors I expect the RMSE performance for all models to be around 2 units.
+
+# Prediction Model Training
+
+## Loading appropriate and Necessary libraries
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(kknn)
+library(poissonreg)
+```
+
+## Splitting Data for Unbiased Results
+
+```{r}
+set.seed(123)
+dat <- read_csv("https://github.com/rdpeng/stat322E_public/raw/main/data/pm25_data.csv.gz")
+dat_split <- initial_split(dat)
+train <- training(dat_split)
+test <- testing(dat_split)
+rec_train <- train |>
+    recipe(value ~ lat + lon + zcta_pop + CMAQ + aod, data = train)
+rec_test <- test |>
+    recipe(value ~ lat + lon + zcta_pop + CMAQ + aod, data = test)
+```
+
+## Relationship between Predictors and PM2.5 Value
+
+```{r}
+dat |>
+    ggplot(aes(x = lat, y = value)) +
+    geom_smooth(method = "lm") +
+    geom_point() +
+    labs(x = 'Latitude', y = 'Annual Average PM2.5 concentration', 
+         title = 'Relationship between Latitude and PM2.5 concentration')
+```
+
+*Graph displays a negative correlation between latitude and PM2.5 concentration with weak magnitude.*
+
+```{r}
+dat |>
+    ggplot(aes(x = lon, y = value)) +
+    geom_smooth(method = "lm") +
+    geom_point() +
+    labs(x = 'Longitude', y = 'Annual Average PM2.5 concentration', 
+         title = 'Relationship between Longitude and PM2.5 concentration')
+```
+
+*Graph displays a positive correlation between longitude and PM2.5 concentration with weak magnitude.*
+
+```{r}
+dat |>
+    ggplot(aes(x = zcta_pop, y = value)) +
+    geom_smooth(method = "lm") +
+    geom_point() +
+    labs(x = 'ZIP Area Population', y = 'Annual Average PM2.5 concentration', 
+         title = 'Relationship between ZIP Population and PM2.5 concentration')
+```
+
+*Graph displays a positive correlation between ZIP population and PM2.5 concentration with weak magnitude.*
+
+```{r}
+dat |>
+    ggplot(aes(x = CMAQ, y = value)) +
+    geom_smooth(method = "lm") +
+    geom_point() +
+    labs(x = 'CMAQ (Community Multiscale Air Quality)', y = 'Annual Average PM2.5 concentration', 
+         title = 'Relationship between CMAQ and PM2.5 concentration')
+```
+
+*Graph displays a positive correlation between CMAQ and PM2.5 concentration with moderate magnitude.*
+
+```{r}
+dat |>
+    ggplot(aes(x = aod, y = value)) +
+    geom_smooth(method = "lm") +
+    geom_point() +
+    labs(x = 'AOD (Aerosol Optical Depth)', y = 'Annual Average PM2.5 concentration', 
+         title = 'Relationship between AOD and PM2.5 concentration')
+```
+
+*Graph displays a positive correlation between aod and PM2.5 concentration with moderate magnitude.*
+
+### Linear Regression
+
+```{r}
+set.seed(123)
+model1 <- linear_reg() |>
+    set_engine("lm") |>
+    set_mode("regression")
+wf1 <- workflow() |>
+    add_recipe(rec_train) |>
+    add_model(model1)
+folds1 <- vfold_cv(train, v = 5)
+model_fit1 <- fit_resamples(wf1, resamples = folds1)
+```
+
+### K-Nearest Neighbor
+
+```{r}
+set.seed(123)
+model2 <- nearest_neighbor(neighbors = 7) |>
+    set_engine("kknn") |>
+    set_mode("regression")
+wf2 <- workflow() |>
+    add_recipe(rec_train) |>
+    add_model(model2)
+folds2 <- vfold_cv(train, v = 5)
+model_fit2 <- fit_resamples(wf2, resamples = folds2)
+```
+
+### Poisson Regression
+
+```{r}
+set.seed(123)
+model3 <- poisson_reg() |>
+    set_engine("glm") |>
+    set_mode("regression")
+wf3 <- workflow() |>
+    add_recipe(rec_train) |>
+    add_model(model3)
+folds3 <- vfold_cv(train, v = 5)
+model_fit3 <- fit_resamples(wf3, resamples = folds3)
+```
+
+When building the three models above, I used the recipe from the training dataset and set a seed to create reproducible results, as well as created folds for each model to ensure that the findings and RMSE values are more random. The fitted models are stored to be later called and create a table for further comparison.
+
+# Results
+
+## Choosing Best Model
+
+```{r}
+models_rmse <- data.frame(
+    Metric = "RMSE",
+    linear = collect_metrics(model_fit1)$mean,
+    knn = collect_metrics(model_fit2)$mean,
+    poisson = collect_metrics(model_fit3)$mean)
+models_rmse
+```
+
+Upon retrieving the RMSE metrics from each model, based on training data, I found that the kNN model noticeably had the lowest RMSE value, thus is the most optimal model out of the three to predict the test data. As for linear and poisson regression, both were similar in RMSE values but the linear model was slightly better in its prediction. Going forward, I will use kNN to calculate predictions and further analyze its performance.
+
+## Visualizing Model Performance
+
+```{r}
+set.seed(123)
+model_fit2 <- fit(wf2, data = test)
+test_pred <- test
+test_pred <- test_pred |>
+    mutate(predictions = pull(predict(model_fit2, test))) |>
+    mutate(residSquare = (value - predictions)^2)
+
+test_pred |>
+    ggplot() +
+    geom_point(aes(x = predictions, y = value)) +
+    geom_smooth(aes(x = predictions, y = value), method = 'lm') +
+    labs(x = 'Predictions', y = 'Observed', title = 'Predictions vs Observations')
+```
+In order to get a clearer understanding of how well the model fits, I use a scatterplot and line of best fit to see how far the residuals are.
+
+
+## Testing Model without 'CMAQ' and 'AOD'
+
+```{r}
+set.seed(123)
+rec_test2 <- test |>
+    recipe(value ~ lat + lon + zcta_pop, data = test)
+wf2 <- workflow() |>
+    add_recipe(rec_test2) |>
+    add_model(model2)
+folds2 <- vfold_cv(test, v = 5)
+model_fit2 <- fit_resamples(wf2, resamples = folds2)
+model_fit2 |>
+    collect_metrics()
+```
+
+To determine the influence of 'CMAQ' and 'aod', I used created another kNN model based on the test data but without those two variables. I did find that removing them resulted in a slightly higher RMSE for the model, suggesting that excluding these predictors can worsen the model by a small amount.
+
+## Finding Residuals of Predictions
+
+```{r}
+set.seed(123)
+test_pred |>
+    group_by(state) |>
+    summarize(mean_residSquare = mean(residSquare)) |>
+    arrange(desc(mean_residSquare))
+
+dat |>
+    group_by(state) |>
+    summarize(records = n()) |>
+    arrange(desc(records))
+```
+
+# Discussion
+
+## Primary Questions
+
+1) Based on the test set performance and calculating the residual squared for each observation, I found that the location the model gives the closest to the observed value is North Dakota, while the location furthest from observed value is Nevada. The mean residual squared value for North Dakota is 0.0017, whereas Nevada has a value of 6.7273, which is a drastic difference in prediction performance. I hypothesize that the biggest reason for Nevada having poor performance is due to having fewer observations recorded, while the good performance would be a result of having many observations for a North Dakota.
+
+2) Two variables that likely have an strong influence on the prediction performance of the model are 'CMAQ' and 'aod'. These predictors are separate measurements that also estimate the level of air pollution of a location, meaning that there should be a positive correlation between these variables and PM2.5 value. Another variable that I did not include, but I think would improve performance, is 'pov'. This variable gives the percentage of people living in poverty and there are usually higher rates of pollution in areas where more poverty exists.
+
+3) When building a model for the test dataset without 'CMAQ' and 'aod', the RMSE metric increased from 1.83 to 1.87. Although this is not a significant difference, it does reveal that excluding these predictors will worsen the model. However, it is also possible that using a different seed may give different results because it's such a small difference.
+
+4) I don't think the model would perform well for Alaska or Hawaii because of how far they are and how different the climates are from the other states in the dataset. For example, the three states that have the most observations in the dataset are California, Ohio, and Illinois, which are extremely distant from Alaska and Hawaii. With varying latitudes and longitudes from the majority, these two states would likely have the least accurate predictions.
+
+## Reflection
+
+Overall, I've learned a pretty decent amount of using model predictions, mostly figuring out how to run models and extracting data from them. The most challenging portion was definitely finding which models to compare and how to run those models, especially the Poisson regression because I wasn't very familiar with how the model worked. As for the performance of the kNN model, I think it performed better than I expected. I thought that all the models would have an RMSE above 2 units, but it ended up being lower which surprised me. 
+
+## References
+
+https://github.com/rdpeng/stat322E_public/raw/main/data/pm25_data.csv.gz 
